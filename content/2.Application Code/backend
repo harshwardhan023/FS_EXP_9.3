@@ -1,0 +1,125 @@
+ Backend (Node.js + Express + MongoDB)
+Directory Structure:
+backend/package.json
+{
+  "name": "aws-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+}
+backend/server.js
+import express from 'express';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import os from 'os';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI || '';
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// MongoDB Schema (optional)
+const MessageSchema = new mongoose.Schema({
+  text: String,
+  host: String,
+  timestamp: { type: Date, default: Date.now }
+});
+const Message = mongoose.model('Message', MessageSchema);
+
+// Connect to MongoDB (optional - skip if not using DB)
+if (MONGODB_URI) {
+  mongoose.connect(MONGODB_URI)
+    .then(() => console.log('✅ MongoDB connected'))
+    .catch(err => console.log('❌ MongoDB error:', err.message));
+}
+
+// Health check endpoint (required for ALB)
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    host: os.hostname(),
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Get messages
+app.get('/api/messages', async (req, res) => {
+  try {
+    const hostname = os.hostname();
+    
+    // If MongoDB connected, fetch from DB
+    if (mongoose.connection.readyState === 1) {
+      const messages = await Message.find().sort({ timestamp: -1 }).limit(10);
+      res.json({ messages, host: hostname, source: 'database' });
+    } else {
+      // Fallback: return static data
+      res.json({
+        messages: [
+          { text: 'Hello from AWS!', host: hostname, timestamp: new Date() },
+          { text: 'Load balancing works!', host: hostname, timestamp: new Date() }
+        ],
+        host: hostname,
+        source: 'static'
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create message
+app.post('/api/messages', async (req, res) => {
+  try {
+    const { text } = req.body;
+    const hostname = os.hostname();
+    
+    if (mongoose.connection.readyState === 1) {
+      const message = await Message.create({ text, host: hostname });
+      res.status(201).json({ message, host: hostname });
+    } else {
+      res.status(201).json({
+        message: { text, host: hostname, timestamp: new Date() },
+        host: hostname
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Server info
+app.get('/api/info', (req, res) => {
+  res.json({
+    host: os.hostname(),
+    platform: os.platform(),
+    arch: os.arch(),
+    cpus: os.cpus().length,
+    memory: {
+      total: `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+      free: `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`
+    },
+    uptime: `${(os.uptime() / 60 / 60).toFixed(2)} hours`,
+    nodeVersion: process.version
+  });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Backend server running on port ${PORT}`);
+  console.log(`🖥️  Hostname: ${os.hostname()}`);
+});
