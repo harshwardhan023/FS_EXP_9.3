@@ -1,0 +1,25 @@
+Delete in this order:
+
+Bash
+
+# 1. Auto Scaling Group (terminates instances)
+aws autoscaling delete-auto-scaling-group --auto-scaling-group-name backend-asg --force-delete
+
+# 2. Load Balancer
+aws elbv2 delete-load-balancer --load-balancer-arn <arn>
+
+# 3. Target Group (wait for ALB deletion first)
+aws elbv2 delete-target-group --target-group-arn <arn>
+
+# 4. Launch Template
+aws ec2 delete-launch-template --launch-template-name backend-launch-template
+
+# 5. Frontend EC2
+# Terminate via console
+
+# 6. Security Groups (delete in reverse dependency order)
+# Backend-SG, ALB-SG, Frontend-SG
+
+# 7. Route 53 Records (if created)
+
+# 8. VPC (if you created a custom one - delete subnets, IGW, route tables first)
