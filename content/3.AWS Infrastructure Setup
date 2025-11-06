@@ -1,0 +1,77 @@
+AWS Infrastructure Setup
+Step 1: VPC & Networking
+Option A: Use Default VPC (Easier)
+
+AWS provides a default VPC in each region
+Has public subnets across multiple AZs
+✅ Recommended for learning
+Option B: Create Custom VPC (Production-like)
+
+Bash
+
+# Using AWS CLI (optional)
+aws ec2 create-vpc --cidr-block 10.0.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=fullstack-vpc}]'
+Manual Steps (AWS Console):
+
+VPC Dashboard → Create VPC
+
+Name: fullstack-vpc
+CIDR: 10.0.0.0/16
+Create Subnets (2 public subnets in different AZs)
+
+Name	AZ	CIDR
+public-subnet-1a	us-east-1a	10.0.1.0/24
+public-subnet-1b	us-east-1b	10.0.2.0/24
+Internet Gateway
+
+Create IGW → Attach to VPC
+Route Table
+
+Create route: 0.0.0.0/0 → Internet Gateway
+Associate with both public subnets
+Step 2: Security Groups
+Create 3 security groups:
+
+SG-1: Frontend-SG
+text
+
+Inbound Rules:
+- HTTP (80) from 0.0.0.0/0
+- HTTPS (443) from 0.0.0.0/0 (optional)
+- SSH (22) from YOUR_IP (for debugging)
+
+Outbound Rules:
+- All traffic
+SG-2: ALB-SG
+text
+
+Inbound Rules:
+- HTTP (80) from 0.0.0.0/0
+- HTTPS (443) from 0.0.0.0/0 (optional)
+
+Outbound Rules:
+- All traffic
+SG-3: Backend-SG
+text
+
+Inbound Rules:
+- Custom TCP (3000) from ALB-SG (use security group ID reference!)
+- SSH (22) from YOUR_IP (optional, for debugging)
+
+Outbound Rules:
+- All traffic
+AWS Console Steps:
+
+EC2 → Security Groups → Create security group
+For Backend-SG inbound rule:
+Type: Custom TCP
+Port: 3000
+Source: Custom → Select ALB-SG from dropdown
+Step 3: Create IAM Role for EC2 (Optional but Recommended)
+text
+
+Role Name: EC2-FullStack-Role
+Trusted Entity: EC2
+Policies:
+- AmazonSSMManagedInstanceCore (for Systems Manager Session Manager)
+- CloudWatchAgentServerPolicy (for logs)
