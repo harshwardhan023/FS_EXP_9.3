@@ -1,0 +1,224 @@
+Step 4: Deploy Backend Instances with Auto Scaling
+Create Launch Template
+EC2 Dashboard → Launch Templates → Create
+Configuration:
+
+text
+
+Name: backend-launch-template
+AMI: Amazon Linux 2023 (or Ubuntu 22.04)
+Instance type: t3.micro (or t2.micro for free tier)
+Key pair: Your SSH key (optional)
+Security group: Backend-SG
+IAM instance profile: EC2-FullStack-Role (if created)
+User Data Script (for Amazon Linux 2023):
+
+Bash
+
+#!/bin/bash
+set -e
+
+# Update system
+sudo dnf update -y
+
+# Install Node.js 20
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo dnf install -y nodejs git
+
+# Install PM2 (process manager)
+sudo npm install -g pm2
+
+# Clone your repository (replace with your repo URL)
+cd /home/ec2-user
+sudo -u ec2-user git clone https://github.com/YOUR_USERNAME/aws-fullstack.git
+cd aws-fullstack/backend
+
+# Install dependencies
+sudo -u ec2-user npm install
+
+# Set environment variables (if using MongoDB Atlas)
+cat > /home/ec2-user/aws-fullstack/backend/.env << EOF
+PORT=3000
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/awsapp
+EOF
+
+# Start application with PM2
+sudo -u ec2-user pm2 start server.js --name backend
+sudo -u ec2-user pm2 save
+sudo -u ec2-user pm2 startup systemd -u ec2-user --hp /home/ec2-user
+
+# Enable PM2 to start on boot
+sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ec2-user --hp /home/ec2-user
+For Ubuntu 22.04, use this user data instead:
+
+Bash
+
+#!/bin/bash
+set -e
+
+apt-get update
+apt-get install -y curl git
+
+# Install Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+apt-get install -y nodejs
+
+npm install -g pm2
+
+# Clone and setup
+cd /home/ubuntu
+sudo -u ubuntu git clone https://github.com/YOUR_USERNAME/aws-fullstack.git
+cd aws-fullstack/backend
+
+sudo -u ubuntu npm install
+
+# Start with PM2
+sudo -u ubuntu pm2 start server.js --name backend
+sudo -u ubuntu pm2 save
+sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
+Create Target Group
+EC2 → Target Groups → Create target group
+text
+
+Target type: Instances
+Name: backend-targets
+Protocol: HTTP
+Port: 3000
+VPC: Your VPC
+Health check path: /api/health
+Health check interval: 30 seconds
+Healthy threshold: 2
+Unhealthy threshold: 2
+Timeout: 5 seconds
+Click Next → Don't register targets yet (Auto Scaling will do this)
+Create Application Load Balancer
+EC2 → Load Balancers → Create → Application Load Balancer
+text
+
+Name: backend-alb
+Scheme: internet-facing
+IP address type: IPv4
+Network mapping:
+  - VPC: Your VPC
+  - Subnets: Select both public subnets (different AZs)
+Security group: ALB-SG
+
+Listeners:
+  - Protocol: HTTP
+  - Port: 80
+  - Default action: Forward to backend-targets
+Create → Wait for status to become Active
+Copy the DNS name (e.g., backend-alb-123456.us-east-1.elb.amazonaws.com)
+Create Auto Scaling Group
+EC2 → Auto Scaling Groups → Create
+text
+
+Name: backend-asg
+Launch template: backend-launch-template
+VPC: Your VPC
+Subnets: Select both public subnets
+
+Group size:
+  - Desired: 2
+  - Minimum: 2
+  - Maximum: 4
+
+Load balancing:
+  - ✅ Attach to an existing load balancer
+  - Choose from your load balancer target groups
+  - Select: backend-targets
+
+Health checks:
+  - ✅ Turn on ELB health checks
+  - Health check grace period: 300 seconds
+Scaling policies (optional):
+text
+
+Target tracking scaling policy
+Metric: Average CPU utilization
+Target value: 50
+Create ASG
+
+Wait 2-5 minutes for instances to launch and pass health checks
+
+Verify: EC2 → Target Groups → backend-targets → Targets tab
+
+Should show 2 instances with status healthy
+Step 5: Deploy Frontend Instance
+Launch EC2 Instance
+EC2 → Instances → Launch instance
+text
+
+Name: frontend-server
+AMI: Amazon Linux 2023
+Instance type: t3.micro
+Key pair: Your SSH key
+Network: Your VPC
+Subnet: public-subnet-1a
+Auto-assign Public IP: Enable
+Security group: Frontend-SG
+IAM instance profile: EC2-FullStack-Role (if created)
+User Data:
+
+Bash
+
+#!/bin/bash
+set -e
+
+# Update and install dependencies
+sudo dnf update -y
+sudo dnf install -y nginx git
+
+# Install Node.js (needed for build)
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo dnf install -y nodejs
+
+# Clone repository
+cd /home/ec2-user
+sudo -u ec2-user git clone https://github.com/YOUR_USERNAME/aws-fullstack.git
+cd aws-fullstack/frontend
+
+# Build React app
+sudo -u ec2-user npm install
+sudo -u ec2-user npm run build
+
+# Deploy to Nginx
+sudo rm -rf /usr/share/nginx/html/*
+sudo cp -r dist/* /usr/share/nginx/html/
+
+# Configure Nginx reverse proxy
+sudo tee /etc/nginx/conf.d/app.conf > /dev/null << 'EOF'
+server {
+    listen 80;
+    server_name _;
+    
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Proxy API requests to ALB
+    location /api/ {
+        proxy_pass http://BACKEND_ALB_DNS_HERE/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+
+# Replace placeholder with actual ALB DNS
+ALB_DNS="backend-alb-123456.us-east-1.elb.amazonaws.com"
+sudo sed -i "s|BACKEND_ALB_DNS_HERE|$ALB_DNS|g" /etc/nginx/conf.d/app.conf
+
+# Start Nginx
+sudo systemctl enable nginx
+sudo systemctl start nginx
