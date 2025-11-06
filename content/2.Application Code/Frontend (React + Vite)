@@ -1,0 +1,285 @@
+Create React App
+Bash
+
+npm create vite@latest frontend -- --template react
+cd frontend
+npm install
+frontend/src/App.jsx
+React
+
+import { useState, useEffect } from 'react';
+import './App.css';
+
+function App() {
+  const [messages, setMessages] = useState([]);
+  const [serverInfo, setServerInfo] = useState(null);
+  const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Fetch messages
+  const fetchMessages = async () => {
+    try {
+      const res = await fetch('/api/messages');
+      const data = await res.json();
+      setMessages(data.messages || []);
+      setError(null);
+    } catch (err) {
+      setError('Failed to fetch messages');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch server info
+  const fetchInfo = async () => {
+    try {
+      const res = await fetch('/api/info');
+      const data = await res.json();
+      setServerInfo(data);
+    } catch (err) {
+      console.error('Failed to fetch server info', err);
+    }
+  };
+
+  // Submit new message
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: newMessage })
+      });
+      
+      if (res.ok) {
+        setNewMessage('');
+        fetchMessages(); // Refresh list
+        fetchInfo(); // Update server info to see which instance handled it
+      }
+    } catch (err) {
+      console.error('Failed to post message', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchMessages();
+    fetchInfo();
+    
+    // Auto-refresh every 3 seconds to see load balancing
+    const interval = setInterval(() => {
+      fetchMessages();
+      fetchInfo();
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="app">
+      <header>
+        <h1>🚀 AWS Full Stack App with Load Balancing</h1>
+        <p>React + Node.js + Express + ALB</p>
+      </header>
+
+      {/* Server Info Card */}
+      {serverInfo && (
+        <div className="server-info">
+          <h3>🖥️ Current Backend Server</h3>
+          <div className="info-grid">
+            <div><strong>Host:</strong> {serverInfo.host}</div>
+            <div><strong>CPUs:</strong> {serverInfo.cpus}</div>
+            <div><strong>Memory:</strong> {serverInfo.memory.free} / {serverInfo.memory.total}</div>
+            <div><strong>Uptime:</strong> {serverInfo.uptime}</div>
+            <div><strong>Platform:</strong> {serverInfo.platform} ({serverInfo.arch})</div>
+            <div><strong>Node:</strong> {serverInfo.nodeVersion}</div>
+          </div>
+          <p className="note">
+            💡 Refresh to see different hosts (load balancing in action!)
+          </p>
+        </div>
+      )}
+
+      {/* Message Form */}
+      <div className="message-form">
+        <h3>✉️ Add Message</h3>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Enter your message..."
+          />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+
+      {/* Messages List */}
+      <div className="messages">
+        <h3>📬 Messages</h3>
+        {loading && <p>Loading...</p>}
+        {error && <p className="error">{error}</p>}
+        {!loading && messages.length === 0 && <p>No messages yet</p>}
+        
+        <div className="message-list">
+          {messages.map((msg, idx) => (
+            <div key={idx} className="message-card">
+              <p className="message-text">{msg.text}</p>
+              <small>
+                Server: <code>{msg.host}</code> | 
+                {new Date(msg.timestamp).toLocaleString()}
+              </small>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
+frontend/src/App.css
+CSS
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #eee;
+}
+
+header h1 {
+  color: #FF9900; /* AWS orange */
+  margin-bottom: 0.5rem;
+}
+
+.server-info {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.info-grid div {
+  background: rgba(255,255,255,0.1);
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.note {
+  background: rgba(255,255,255,0.2);
+  padding: 0.75rem;
+  border-radius: 6px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.message-form {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 12px;
+  margin-bottom: 2rem;
+}
+
+.message-form form {
+  display: flex;
+  gap: 1rem;
+}
+
+.message-form input {
+  flex: 1;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.message-form button {
+  padding: 0.75rem 2rem;
+  background: #FF9900;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.message-form button:hover {
+  background: #ec7211;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.message-card {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.message-text {
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.message-card small {
+  color: #666;
+}
+
+.message-card code {
+  background: #f4f4f4;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+}
+
+.error {
+  color: #d32f2f;
+  background: #ffebee;
+  padding: 1rem;
+  border-radius: 6px;
+}
+Build configuration for production
+Update frontend/vite.config.js:
+
+JavaScript
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      }
+    }
+  }
+})
